@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>Agente IA - Oracle HR</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 Agente IA ACHX13 | HR</h1>
+
+    <div id="conn-section">
+      <h3>Conexión a Base de Datos</h3>
+      <form id="connect-form">
+        <label>
+          Motor
+          <select id="db-client">
+            <option value="oracledb">Oracle</option>
+            <option value="sqlite3">SQLite</option>
+          </select>
+        </label>
+        <div id="oracle-fields">
+          <input id="db-user" placeholder="Usuario (ej: HR)" />
+          <input id="db-pass" placeholder="Password" type="password" />
+          <input id="db-host" placeholder="Host" value="localhost" />
+          <input id="db-port" placeholder="Puerto" value="1521" />
+          <input id="db-service" placeholder="Service" value="XE" />
+        </div>
+        <div id="sqlite-fields" style="display:none;">
+          <input id="db-filename" placeholder="Ruta SQLite (./backend/database.sqlite)" value="./backend/database.sqlite" />
+        </div>
+        <button type="submit" id="connect-btn">Conectar</button>
+        <button type="button" id="disconnect-btn" disabled>Desconectar</button>
+        <span id="conn-status"></span>
+      </form>
+    </div>
+
+    <form id="query-form">
+      <input id="question-input" placeholder="Ej: Muéstrame nombres y salary de empleados con salary > 5000" disabled />
+      <button type="submit" disabled>Ejecutar</button>
+    </form>
+
+    <h3>Consulta generada:</h3>
+    <pre id="sql-query" class="code-block"></pre>
+
+    <div id="results-table-container"></div>
+
+    <div id="teach-section" style="margin-top:24px;">
+      <h3>Enseñar al agente</h3>
+      <form id="learn-form">
+        <input id="learn-question" placeholder="Pregunta (cómo lo dirías tú)" />
+        <textarea id="learn-sql" placeholder="SQL correcto para esa pregunta" rows="4"></textarea>
+        <div>
+          <button type="submit" id="learn-btn">Guardar Aprendizaje</button>
+          <span id="learn-status"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de confirmación -->
+  <div id="confirm-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <h2>⚠️ Confirmar Operación de Modificación</h2>
+      <p id="modal-message">¿Estás seguro de que deseas ejecutar esta operación?</p>
+      <div class="modal-sql">
+        <strong>SQL a ejecutar:</strong>
+        <pre id="modal-sql-text"></pre>
+      </div>
+      <div class="modal-buttons">
+        <button id="confirm-yes" class="btn-confirm">Sí, Ejecutar</button>
+        <button id="confirm-cancel" class="btn-cancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal de resultado -->
+  <div id="result-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <h2>✅ Operación Completada</h2>
+      <p id="result-message"></p>
+      <div class="modal-buttons">
+        <button id="result-ok" class="btn-confirm">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
