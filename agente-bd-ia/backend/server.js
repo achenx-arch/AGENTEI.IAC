@@ -2,9 +2,20 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const knexConfig = require('./knexfile');
 const Knex = require('knex');
-const defaultKnex = Knex(knexConfig.development);
+// Create a safe default knex that doesn't require external DB at boot
+let defaultKnex;
+try {
+  if ((process.env.DB_CLIENT || '').toLowerCase() === 'sqlite3') {
+    const filename = process.env.SQLITE_PATH || path.join(__dirname, 'database.sqlite');
+    defaultKnex = Knex({ client: 'sqlite3', connection: { filename }, useNullAsDefault: true });
+  } else {
+    // Fallback to in-memory SQLite so the app always starts
+    defaultKnex = Knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+  }
+} catch (e) {
+  defaultKnex = Knex({ client: 'sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+}
 const { generateQuery } = require('./agent-simple');
 const { saveLearnedQuery, getLearningStats } = require('./agent-learning');
 const fetch = require('node-fetch');
