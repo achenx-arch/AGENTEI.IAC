@@ -137,13 +137,23 @@ function parseWhereClauses(question, tableAlias) {
   const salaryBetween = question.match(/salario\s*(?:entre|between)\s*(\d+(?:[.,]\d+)?)\s*y\s*(\d+(?:[.,]\d+)?)/i);
   if (salaryBetween) clauses.push(`${tableAlias}.salary BETWEEN ${salaryBetween[1].replace(',', '.')} AND ${salaryBetween[2].replace(',', '.')}`);
 
-  // department filter
+  // department filter by ID
   const depEq = question.match(/departamento\s*(?:=|igual a|es)\s*(\d+)/i);
   if (depEq) clauses.push(`${tableAlias}.department_id = ${depEq[1]}`);
   const depIn = question.match(/departamento(?:s)?\s*(?:en|in)\s*\(([^)]+)\)/i);
   if (depIn) {
     const list = depIn[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !Number.isNaN(n));
     if (list.length) clauses.push(`${tableAlias}.department_id IN (${list.join(', ')})`);
+  }
+
+  // department filter by name (e.g., "departamento de TI", "departamento IT")
+  const depNameMatch = question.match(/departamento\s+(?:de\s+)?([A-Za-zÀ-ÿ0-9\s]+?)(?:\s|\?|$)/i);
+  if (depNameMatch) {
+    const depName = depNameMatch[1].trim().toUpperCase();
+    // Avoid matching question words like "cuantos", "trabajan", etc.
+    if (depName && !/^(CUANTOS|TRABAJAN|TIENE|HAY|MOSTRAR|LISTAR)$/i.test(depName)) {
+      clauses.push(`UPPER(d.department_name) LIKE '%${depName}%'`);
+    }
   }
 
   // name like
@@ -180,9 +190,14 @@ function detectMainTables(question) {
 
 function buildSelectWithJoin(question, dbClient) {
   const wantsJoin = /join|inner join|departament|nombre del departamento|por departamento|empleados y departamentos/i.test(question);
+  const wantsLeftJoin = /(left join|todos los empleados incluso sin|empleados sin departamento)/i.test(question);
+  const wantsRightJoin = /(right join|todos los departamentos incluso sin empleados)/i.test(question);
+  const wantsSelfJoin = /(manager|jefe|supervisor|empleado y su (manager|jefe))/i.test(question);
+  const wantsSubquery = /(mayor que el promedio|mayor al promedio|salario.*promedio|por encima del promedio|supera el promedio)/i.test(question);
+  
   const tables = detectMainTables(question);
-  const useEmployees = tables.includes('employees') || wantsJoin;
-  const useDepartments = tables.includes('departments') || /departament/i.test(question) || wantsJoin;
+  const useEmployees = tables.includes('employees') || wantsJoin || wantsSelfJoin;
+  const useDepartments = tables.includes('departments') || /departament/i.test(question) || wantsJoin || wantsLeftJoin || wantsRightJoin;
 
   // Aggregates
   const wantsAvg = /(promedio|avg)/i.test(question);
@@ -198,9 +213,23 @@ function buildSelectWithJoin(question, dbClient) {
   let from = 'FROM employees e';
   const wantsAnyAgg = wantsCount || wantsAvg || wantsSum || wantsMin || wantsMax;
   let selectCols = wantsAnyAgg && !groupByDepartment && !groupByYear && !groupByMonth ? [] : ['e.*'];
-  if (useDepartments) {
-    from += ' INNER JOIN departments d ON e.department_id = d.department_id';
-    if (!groupByDepartment && !wantsAnyAgg && !groupByYear && !groupByMonth) selectCols.push('d.department_name AS department_name');
+  
+  // Handle SELF JOIN for manager relationships
+  if (wantsSelfJoin) {
+    selectCols = ['e.employee_id', 'e.first_name', 'e.last_name', 'e.salary', 'm.first_name AS manager_first_name', 'm.last_name AS manager_last_name'];
+    from += ' LEFT JOIN employees m ON e.manager_id = m.employee_id';
+  }
+  
+  // Handle JOIN types with departments
+  if (useDepartments && !wantsSelfJoin) {
+    if (wantsLeftJoin) {
+      from += ' LEFT JOIN departments d ON e.department_id = d.department_id';
+    } else if (wantsRightJoin) {
+      from += ' RIGHT JOIN departments d ON e.department_id = d.department_id';
+    } else {
+      from += ' INNER JOIN departments d ON e.department_id = d.department_id';
+    }
+    if (!groupByDepartment && !wantsAnyAgg && !groupByYear && !groupByMonth && !wantsSelfJoin) selectCols.push('d.department_name AS department_name');
   }
 
   // SELECT columns with aggregates
@@ -217,8 +246,13 @@ function buildSelectWithJoin(question, dbClient) {
     if (selectParts.length === 0) selectParts.push('COUNT(*) AS total');
   }
 
-  // WHERE
+  // WHERE with optional subquery
   const whereClauses = parseWhereClauses(question, 'e');
+  
+  // Add subquery for salary comparisons
+  if (wantsSubquery && /promedio|avg/i.test(question)) {
+    whereClauses.push('e.salary > (SELECT AVG(salary) FROM employees)');
+  }
 
   // GROUP BY / HAVING
   let groupBy = '';
@@ -280,8 +314,29 @@ function buildSelectWithJoin(question, dbClient) {
 
 function generateQuery(userQuestion, dbClient) {
   // Si el usuario ya escribe SQL, devolver tal cual para ejecutar directamente
-  if (/^\s*(select|with|insert|update|delete)\b/i.test(userQuestion)) {
+  if (/^\s*(select|with|insert|update|delete|create)\b/i.test(userQuestion)) {
     return userQuestion.trim();
+  }
+  
+  // Handle CREATE VIEW
+  if (/crear vista|create view/i.test(userQuestion)) {
+    const viewNameMatch = userQuestion.match(/(?:vista|view)\s+(\w+)/i);
+    const viewName = viewNameMatch ? viewNameMatch[1] : 'vw_empleados_basico';
+    return `CREATE OR REPLACE VIEW ${viewName} AS SELECT employee_id, first_name, last_name, salary FROM employees`;
+  }
+  
+  // Handle CREATE SEQUENCE
+  if (/crear secuencia|create sequence/i.test(userQuestion)) {
+    const seqNameMatch = userQuestion.match(/(?:secuencia|sequence)\s+(\w+)/i);
+    const seqName = seqNameMatch ? seqNameMatch[1] : 'seq_demo';
+    const startMatch = userQuestion.match(/start\s+with\s+(\d+)|empezar\s+en\s+(\d+)/i);
+    const start = startMatch ? (startMatch[1] || startMatch[2]) : '1';
+    const client = (dbClient || process.env.DB_CLIENT || '').toLowerCase();
+    if (client === 'oracledb') {
+      return `CREATE SEQUENCE ${seqName} START WITH ${start} INCREMENT BY 1`;
+    } else {
+      return `-- SQLite does not support sequences natively. Use AUTOINCREMENT on INTEGER PRIMARY KEY instead.`;
+    }
   }
 
   const question = userQuestion.toLowerCase();
@@ -334,8 +389,8 @@ function generateQuery(userQuestion, dbClient) {
     }
   }
 
-  // Consultas avanzadas: WHERE, JOIN, AGG, GROUP BY, ORDER BY, LIMIT
-  if (/where|entre|between|in\s*\(|like|nulo|null|join|inner|promedio|avg|suma|sum|mínimo|min|máximo|max|contar|count|por departamento|ordenar por|order by|top\s+\d+|primeros?\s+\d+|limit\s+\d+/i.test(question)) {
+  // Consultas avanzadas: WHERE, JOIN, AGG, GROUP BY, ORDER BY, LIMIT, SUBQUERIES
+  if (/where|entre|between|in\s*\(|like|nulo|null|join|inner|left|right|self|manager|jefe|promedio|avg|suma|sum|mínimo|min|máximo|max|contar|count|por departamento|ordenar por|order by|top\s+\d+|primeros?\s+\d+|limit\s+\d+|mayor que el promedio|subconsulta/i.test(question)) {
     // Si se menciona empleados o se necesita datos de salarios, partir de employees con opcional join a departments
     return buildSelectWithJoin(question, dbClient);
   }
