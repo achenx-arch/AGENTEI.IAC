@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const Knex = require('knex');
 // Create a safe default knex that doesn't require external DB at boot
 let defaultKnex;
@@ -37,6 +38,7 @@ app.use(express.json());
 
 // Servir archivos estáticos del frontend
 const frontendPath = path.join(__dirname, '..', 'frontend');
+const indexPath = path.join(frontendPath, 'index.html');
 app.use(express.static(frontendPath));
 
 // Health check for Render
@@ -234,7 +236,11 @@ app.get('*', (req, res) => {
   if (req.path.startsWith('/api')) {
     return res.status(404).json({ error: 'Not found' });
   }
-  res.sendFile(path.join(frontendPath, 'index.html'));
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  // Minimal response if frontend assets are not packaged under backend root
+  res.status(200).send('<!doctype html><html><head><meta charset="utf-8"><title>Agente BD IA</title></head><body><h1>Agente BD IA</h1><p>El frontend no está empaquetado en esta ruta. La API está viva.</p></body></html>');
 });
 
 app.listen(port, host, () => {
