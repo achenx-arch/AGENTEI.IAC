@@ -28,6 +28,11 @@ app.use(express.json());
 const frontendPath = path.join(__dirname, '..', 'frontend');
 app.use(express.static(frontendPath));
 
+// Health check for Render
+app.get('/healthz', (req, res) => {
+  res.status(200).send('ok');
+});
+
 app.post('/api/connect', async (req, res) => {
   try {
     const { client, config } = req.body || {};
@@ -211,6 +216,14 @@ app.get('/api/learning-stats', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo estadísticas', details: err.message });
   }
+});
+
+// SPA fallback: serve index.html for non-API routes
+app.get('*', (req, res) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
 app.listen(port, host, () => {
